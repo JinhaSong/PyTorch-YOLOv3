@@ -2,14 +2,19 @@ import glob
 import random
 import os
 import sys
+import zipfile
+
 import numpy as np
 from PIL import Image
 import torch
 import torch.nn.functional as F
+import tarfile
+import io
 
 from utils.augmentations import horisontal_flip
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+from torchvision.transforms import ToTensor, ToPILImage
 
 
 def pad_to_square(img, pad_value):
@@ -55,6 +60,67 @@ class ImageFolder(Dataset):
     def __len__(self):
         return len(self.files)
 
+class TarLoader(Dataset):
+    def __init__(self, img_dir='data.tar', transform=None, img_size=416):
+        self.img_names = []
+        self.img_dir = img_dir
+        self.transform = transform
+        self.to_tensor = ToTensor()
+        self.to_pil = ToPILImage()
+        self.tf = tarfile.open(self.img_dir, 'r')
+        self.img_size = img_size
+        for file_name in self.tf.getmembers():
+            self.img_names.append(file_name.name)
+
+    def get_image_from_tar(self, name):
+        imginfo = self.tf.getmember(name)
+        image = self.tf.extractfile(imginfo)
+        image = image.read()
+        image = transforms.ToTensor()(Image.open(io.BytesIO(image)))
+        image, _ = pad_to_square(image, 0)
+        image = resize(image, self.img_size)
+        return name, image
+
+    def __len__(self):
+        return len(self.img_names)
+
+    def __getitem__(self, index):
+        image = self.get_image_from_tar(self.img_names[index])
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        sample = image
+
+        return sample
+
+class ZipFileLoader(Dataset):
+    def __init__(self, img_dir='data.zip', transform=None, img_size=416):
+        self.img_dir = img_dir
+        self.transform = transform
+        self.to_tensor = ToTensor()
+        self.to_pil = ToPILImage()
+        self.zip_file = zipfile.ZipFile(self.img_dir)
+        self.img_size = img_size
+        self.img_names = self.zip_file.namelist()
+
+    def get_image_from_tar(self, name):
+        image = self.zip_file.read(name)
+        image = transforms.ToTensor()(Image.open(io.BytesIO(image)))
+        image, _ = pad_to_square(image, 0)
+        image = resize(image, self.img_size)
+        return name, image
+
+    def __len__(self):
+        return len(self.img_names)
+
+    def __getitem__(self, index):
+        image = self.get_image_from_tar(self.img_names[index])
+        if self.transform is not None:
+            image = self.transform(image)
+        sample = image
+
+        return sample
 
 class ListDataset(Dataset):
     def __init__(self, list_path, img_size=416, augment=True, multiscale=True, normalized_labels=True):
